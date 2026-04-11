@@ -17,6 +17,11 @@ from flask import Flask, jsonify, render_template, request
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
 
+# Suprime aviso cosmético do yfinance sobre TzCache
+logging.getLogger('yfinance').setLevel(logging.ERROR)
+import warnings
+warnings.filterwarnings('ignore', message='.*TzCache.*')
+
 app = Flask(__name__, template_folder='templates', static_folder='static')
 DB_PATH = Path(__file__).parent / 'mercado.db'
 
@@ -122,6 +127,8 @@ def coletar_yahoo():
     """Busca cotações do Yahoo Finance e salva no banco."""
     try:
         import yfinance as yf
+        import tempfile, os
+        yf.set_tz_cache_location(os.path.join(tempfile.gettempdir(), 'yf_tz_cache'))
     except ImportError:
         log.error("yfinance não instalado. Rode: pip install yfinance")
         return False
