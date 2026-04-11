@@ -62,7 +62,7 @@ ATIVOS_DOLAR = [
     {"yahoo": "AUDUSD=X","cod": "USD/AUD", "nome": "USD/AUD",               "inv": False},
     {"yahoo": "KRW=X",   "cod": "USD/KRW", "nome": "USD/KRW",               "inv": False},
     {"yahoo": "CNY=X",   "cod": "USD/CNY", "nome": "USD/CNY",               "inv": False},
-    {"yahoo": "EURBRL=X","cod": "EUR/BRL", "nome": "EUR/BRL",               "inv": True},
+    {"yahoo": "EURBRL=X","cod": "EUR/BRL", "nome": "EUR/BRL",               "inv": False},
 ]
 
 CHINA_CODS = {"CHINA50", "HSI", ".DJSH", ".SZI", ".SSEC"}
@@ -117,8 +117,8 @@ def calc_sinal(variacao, inv=False):
     if variacao is None:
         return "Neutro"
     v = -variacao if inv else variacao
-    if v < -THR:  return "Alta"
-    if v >  THR:  return "Queda"
+    if v > THR:   return "Alta"
+    if v < -THR:  return "Queda"
     return "Neutro"
 
 # ── Coleta Yahoo Finance ───────────────────────────────────────────────────────
