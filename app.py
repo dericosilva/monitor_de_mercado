@@ -41,15 +41,15 @@ ATIVOS_RISCO = [
     {"yahoo": "EEM",     "cod": "EEM",     "nome": "Emerging Markets ETF",  "inv": False},
     {"yahoo": "SOXX",    "cod": "SOXX",    "nome": "Semiconductor ETF",     "inv": False},
     {"yahoo": "^BSESN",  "cod": ".BSESN",  "nome": "BSE Sensex 30",         "inv": False},
-    {"yahoo": "CN=F",    "cod": "CHINA50", "nome": "China A50 Futuros",     "inv": False},
+    {"yahoo": "^FTXIN9", "cod": "CHINA50", "nome": "China A50",             "inv": False},
     {"yahoo": "^HSI",    "cod": "HSI",     "nome": "Hang Seng",             "inv": False},
     {"yahoo": "^DJSH",   "cod": ".DJSH",   "nome": "Dow Jones Shanghai",    "inv": False},
-    {"yahoo": "^SZI",    "cod": ".SZI",    "nome": "SZSE Component",        "inv": False},
+    {"yahoo": "399001.SZ","cod": ".SZI",   "nome": "SZSE Component",        "inv": False},
     {"yahoo": "000001.SS","cod": ".SSEC",  "nome": "Shanghai Composite",    "inv": False},
 ]
 
 ATIVOS_DOLAR = [
-    {"yahoo": "DX=F",    "cod": "DX",      "nome": "Índice Dólar Futuros",  "inv": False},
+    {"yahoo": "UUP",     "cod": "DX",      "nome": "Índice Dólar (UUP)",    "inv": False},
     {"yahoo": "^VIX",    "cod": "VX",      "nome": "S&P 500 VIX",           "inv": False},
     {"yahoo": "MXN=X",   "cod": "USD/MXN", "nome": "USD/MXN",               "inv": False},
     {"yahoo": "NOK=X",   "cod": "USD/NOK", "nome": "USD/NOK",               "inv": False},
