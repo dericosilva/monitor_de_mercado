@@ -41,7 +41,7 @@ ATIVOS_RISCO = [
     {"yahoo": "EEM",     "cod": "EEM",     "nome": "Emerging Markets ETF",  "inv": False},
     {"yahoo": "SOXX",    "cod": "SOXX",    "nome": "Semiconductor ETF",     "inv": False},
     {"yahoo": "^BSESN",  "cod": ".BSESN",  "nome": "BSE Sensex 30",         "inv": False},
-    {"yahoo": "^FTXIN9", "cod": "CHINA50", "nome": "China A50",             "inv": False},
+    {"yahoo": "XC=F",    "cod": "CHINA50", "nome": "China A50 Futuros",     "inv": False},
     {"yahoo": "^HSI",    "cod": "HSI",     "nome": "Hang Seng",             "inv": False},
     {"yahoo": "^DJSH",   "cod": ".DJSH",   "nome": "Dow Jones Shanghai",    "inv": False},
     {"yahoo": "399001.SZ","cod": ".SZI",   "nome": "SZSE Component",        "inv": False},
