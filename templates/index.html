@@ -204,11 +204,14 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
         <div class="rnum"><div class="v" id="china-v" style="font-size:28px">--</div><div class="l">Média</div></div>
       </div>
     </div>
-    <div class="rcard acum">
-      <div class="rlabel">📊 Acumulado A-B</div>
-      <div class="rnums">
-        <div class="rnum"><div class="v" id="acum-r" style="font-size:28px">--</div><div class="l">Risco</div></div>
-        <div class="rnum"><div class="v" id="acum-d" style="font-size:28px">--</div><div class="l">Dólar</div></div>
+    <div class="rcard acum" id="direcional-card">
+      <div class="rlabel">🎯 Direcional IBov</div>
+      <div class="rnums" style="align-items:center">
+        <div class="rnum">
+          <div id="direcional-icon" style="font-size:38px;line-height:1">--</div>
+          <div class="v" id="direcional-txt" style="font-size:15px;letter-spacing:2px;margin-top:2px">--</div>
+          <div class="l" style="margin-top:4px">Alta <span id="dir-a">0</span> · Queda <span id="dir-q">0</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -418,11 +421,30 @@ async function fetchLive(){
     ch.textContent=(cm>=0?'+':'')+(cm*100).toFixed(2)+'%';
     ch.className='v '+(cm<-THR?'c-a':cm>THR?'c-q':'c-n');
 
-    const ar=document.getElementById('acum-r'), ad=document.getElementById('acum-d');
-    ar.textContent=(r.acum_risco>=0?'+':'')+r.acum_risco;
-    ar.className='v '+(r.acum_risco>0?'c-p':r.acum_risco<0?'c-m':'c-z');
-    ad.textContent=(r.acum_dolar>=0?'+':'')+r.acum_dolar;
-    ad.className='v '+(r.acum_dolar>0?'c-p':r.acum_dolar<0?'c-m':'c-z');
+    // Direcional IBov: soma Alta e Queda de risco + dólar
+    const totalAlta  = r.ra + r.da;
+    const totalQueda = r.rq + r.dq;
+    document.getElementById('dir-a').textContent = totalAlta;
+    document.getElementById('dir-q').textContent = totalQueda;
+    const dIcon = document.getElementById('direcional-icon');
+    const dTxt  = document.getElementById('direcional-txt');
+    const dCard = document.getElementById('direcional-card');
+    if (totalAlta > totalQueda) {
+      dIcon.textContent = '📉';
+      dTxt.textContent  = 'PESSIMISTA';
+      dTxt.className    = 'v c-q';
+      dCard.style.borderTopColor = 'var(--queda)';
+    } else if (totalQueda > totalAlta) {
+      dIcon.textContent = '📈';
+      dTxt.textContent  = 'OTIMISTA';
+      dTxt.className    = 'v c-a';
+      dCard.style.borderTopColor = 'var(--alta)';
+    } else {
+      dIcon.textContent = '➡️';
+      dTxt.textContent  = 'NEUTRO';
+      dTxt.className    = 'v c-n';
+      dCard.style.borderTopColor = 'var(--neutro)';
+    }
 
     feedChart(chartLive, d.snapshots);
 
