@@ -137,6 +137,15 @@ td:not(:first-child){text-align:right}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .si{display:flex;align-items:center;gap:6px}
 .pb{height:38px}
+.chart-filters{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:0.5px solid var(--color-border-tertiary);flex-wrap:wrap}
+.cf-label{font-size:11px;color:var(--color-text-secondary);letter-spacing:1px;white-space:nowrap}
+.cf-sep{color:var(--color-text-tertiary);font-size:13px}
+input[type=time]{background:var(--surf2,var(--color-background-secondary));border:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);padding:4px 8px;font-family:var(--font-mono);font-size:12px;border-radius:var(--border-radius-md);color-scheme:dark;width:100px}
+input[type=time]:focus{outline:none;border-color:var(--color-border-info)}
+.cf-btn{background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-secondary);padding:4px 12px;font-family:var(--font-mono);font-size:11px;border-radius:var(--border-radius-md);cursor:pointer;transition:all .15s}
+.cf-btn:hover{border-color:var(--color-border-info);color:var(--color-text-info)}
+.cf-btn.active{background:var(--color-background-info);border-color:var(--color-border-info);color:var(--color-text-info)}
+.cf-count{font-size:10px;color:var(--color-text-tertiary);margin-left:auto}
 
 /* toast */
 #toast{
@@ -231,13 +240,25 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
 
   <div class="chart-wrap">
     <div class="chart-head">
-      <div class="chart-title">Histórico do dia — snapshots a cada 5 min</div>
+      <div class="chart-title">Direcional Dólar — snapshots a cada 5 min</div>
       <div class="legend">
-        <div class="leg"><div class="legdot" style="background:#00e676"></div>Risco Alta</div>
-        <div class="leg"><div class="legdot" style="background:#f5222d"></div>Risco Queda</div>
-        <div class="leg"><div class="legdot" style="background:#2d8cf0"></div>Dólar Alta</div>
-        <div class="leg"><div class="legdot" style="background:#f6c90e;border-radius:0"></div>Acum. Risco</div>
+        <div class="leg"><div class="legdot" style="background:#00e676"></div>Alta</div>
+        <div class="leg"><div class="legdot" style="background:#f5222d"></div>Baixa</div>
+        <div class="leg"><div class="legdot" style="background:#aaa;width:16px;height:3px;border-radius:0"></div>Neutro</div>
+        <div class="leg"><div class="legdot" style="background:#2d8cf0;width:16px;height:3px;border-radius:0"></div>Aceleração do preço</div>
       </div>
+    </div>
+    <div class="chart-filters">
+      <span class="cf-label">DE</span>
+      <input type="time" id="filtro-de" value="00:00" step="300" onchange="aplicarFiltro()">
+      <span class="cf-sep">→</span>
+      <span class="cf-label">ATÉ</span>
+      <input type="time" id="filtro-ate" step="300" onchange="aplicarFiltro()">
+      <button class="cf-btn" onclick="resetFiltro()">Ver tudo</button>
+      <button class="cf-btn" id="btn-pregao" onclick="filtroRapido('pregao')">Pregão (09:00–18:00)</button>
+      <button class="cf-btn" id="btn-manha" onclick="filtroRapido('manha')">Manhã (06:00–12:00)</button>
+      <button class="cf-btn" id="btn-tarde" onclick="filtroRapido('tarde')">Tarde (12:00–18:00)</button>
+      <span class="cf-count" id="cf-count"></span>
     </div>
     <div class="carea"><canvas id="graf-live"></canvas></div>
   </div>
@@ -377,6 +398,57 @@ function mkChart(id, datasets){
   });
 }
 
+// ── Filtro de horário ────────────────────────────────────────────────────────
+
+let todosSnaps = [];  // guarda todos os snapshots sem filtro
+
+function aplicarFiltro(){
+  const de  = document.getElementById('filtro-de').value;
+  const ate = document.getElementById('filtro-ate').value;
+
+  // remove destaque dos botões rápidos
+  ['btn-pregao','btn-manha','btn-tarde'].forEach(id=>{
+    const b=document.getElementById(id); if(b) b.classList.remove('active');
+  });
+
+  let filtrados = todosSnaps;
+  if(de) filtrados = filtrados.filter(s=> s.hora >= de);
+  if(ate) filtrados = filtrados.filter(s=> s.hora <= ate+':59');
+
+  document.getElementById('cf-count').textContent =
+    filtrados.length ? `${filtrados.length} snapshots` : 'nenhum snapshot no período';
+
+  feedChart(chartLive, filtrados);
+}
+
+function resetFiltro(){
+  document.getElementById('filtro-de').value  = '00:00';
+  document.getElementById('filtro-ate').value = '';
+  ['btn-pregao','btn-manha','btn-tarde'].forEach(id=>{
+    const b=document.getElementById(id); if(b) b.classList.remove('active');
+  });
+  document.getElementById('cf-count').textContent = '';
+  feedChart(chartLive, todosSnaps);
+}
+
+function filtroRapido(periodo){
+  const map = {
+    pregao: {de:'09:00', ate:'18:00', btn:'btn-pregao'},
+    manha:  {de:'06:00', ate:'12:00', btn:'btn-manha'},
+    tarde:  {de:'12:00', ate:'18:00', btn:'btn-tarde'},
+  };
+  const p = map[periodo];
+  document.getElementById('filtro-de').value  = p.de;
+  document.getElementById('filtro-ate').value = p.ate;
+  ['btn-pregao','btn-manha','btn-tarde'].forEach(id=>{
+    const b=document.getElementById(id);
+    if(b) b.classList.toggle('active', id===p.btn);
+  });
+  aplicarFiltro();
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+
 function initCharts(){
   chartLive = mkChart('graf-live',[
     {label:'Risco Alta', data:[],borderColor:'#00e676',backgroundColor:'rgba(0,230,118,.05)',borderWidth:2,tension:.4,fill:false,pointRadius:3,pointBackgroundColor:'#00e676'},
@@ -392,12 +464,16 @@ function initCharts(){
 }
 
 function feedChart(chart, snaps, modeHist=false){
-  if(!chart||!snaps) return;
+  if(!chart||!snaps||!snaps.length) return;
   chart.data.labels = snaps.map(s=>s.hora);
-  chart.data.datasets[0].data = snaps.map(s=>s.ra);
-  chart.data.datasets[1].data = snaps.map(s=>s.rq);
-  if(!modeHist) chart.data.datasets[2].data = snaps.map(s=>s.da);
-  chart.data.datasets[modeHist?2:3].data = snaps.map(s=>s.acum_risco);
+  // Alta total = risco Alta + dólar Alta (igual E6 da planilha: COUNTIF todos)
+  chart.data.datasets[0].data = snaps.map(s=>(s.ra||0)+(s.da||0));
+  // Queda total = risco Queda + dólar Queda
+  chart.data.datasets[1].data = snaps.map(s=>(s.rq||0)+(s.dq||0));
+  // Neutro total
+  chart.data.datasets[2].data = snaps.map(s=>(s.rn||0)+(s.dn||0));
+  // Aceleração = soma cumulativa de (Alta-Queda) ao longo do dia (igual coluna J da planilha)
+  chart.data.datasets[3].data = snaps.map(s=>s.aceleracao!=null?s.aceleracao:0);
   chart.update('none');
 }
 
@@ -446,7 +522,18 @@ async function fetchLive(){
       dCard.style.borderTopColor = 'var(--neutro)';
     }
 
-    feedChart(chartLive, d.snapshots);
+    // Armazena todos os snapshots e aplica filtro ativo
+    todosSnaps = d.snapshots || [];
+    const de  = document.getElementById('filtro-de').value;
+    const ate = document.getElementById('filtro-ate').value;
+    const temFiltro = (de && de !== '00:00') || ate;
+    if(temFiltro){
+      aplicarFiltro();
+    } else {
+      feedChart(chartLive, todosSnaps);
+      document.getElementById('cf-count').textContent =
+        todosSnaps.length ? `${todosSnaps.length} snapshots` : '';
+    }
 
     document.getElementById('ult-coleta').textContent = d.ultima_coleta;
     document.getElementById('sdot').className='sdot on';
@@ -560,6 +647,13 @@ setInterval(fetchLive, 30000);
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 initCharts();
+
+// Define "até" como hora atual por padrão
+const agora = new Date();
+const hh = String(agora.getHours()).padStart(2,'0');
+const mm = String(agora.getMinutes()).padStart(2,'0');
+document.getElementById('filtro-ate').value = hh+':'+mm;
+
 fetchLive();
 </script>
 </body>

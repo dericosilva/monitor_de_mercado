@@ -105,10 +105,18 @@ def init_db():
                 da INTEGER, dq INTEGER, dn INTEGER,
                 acum_risco INTEGER,
                 acum_dolar INTEGER,
-                china_media REAL
+                china_media REAL,
+                ab_inst INTEGER,
+                aceleracao INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_snap_data ON snapshots(data);
         """)
+        # Adiciona colunas novas em banco existente (ignora erro se já existir)
+        for col in ["ab_inst INTEGER", "aceleracao INTEGER"]:
+            try:
+                conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col}")
+            except Exception:
+                pass
     log.info("Banco inicializado: %s", DB_PATH)
 
 # ── Lógica de sinal ────────────────────────────────────────────────────────────
@@ -202,7 +210,6 @@ def coletar_yahoo():
 def _salvar_snapshot(data_str, hora_str, ts):
     """Calcula resumo do momento e salva snapshot."""
     with get_db() as conn:
-        # Pega última cotação de cada ativo no dia
         rows = conn.execute("""
             SELECT cod, sinal, variacao, grupo
             FROM cotacoes
@@ -228,11 +235,26 @@ def _salvar_snapshot(data_str, hora_str, ts):
 
     china_media = sum(china_vars)/len(china_vars) if china_vars else 0.0
 
+    # A-B instantâneo (soma risco + dólar)
+    total_alta  = ra + da
+    total_queda = rq + dq
+    ab_inst = total_alta - total_queda
+
+    # Aceleração acumulada do dia: soma de ab_inst desde o início do dia
+    # Começa em zero a cada novo dia (igual planilha: J=I+J_anterior, J_primeiro=I_primeiro)
+    with get_db() as conn:
+        ultimo = conn.execute(
+            "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
+            (data_str,)
+        ).fetchone()
+    aceleracao_anterior = ultimo["aceleracao"] if ultimo and ultimo["aceleracao"] is not None else 0
+    aceleracao = aceleracao_anterior + ab_inst
+
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO snapshots(ts,data,hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (ts, data_str, hora_str, ra, rq, rn, da, dq, dn, ra-rq, da-dq, china_media))
+            INSERT INTO snapshots(ts,data,hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media,ab_inst,aceleracao)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (ts, data_str, hora_str, ra, rq, rn, da, dq, dn, ra-rq, da-dq, china_media, ab_inst, aceleracao))
 
 # ── Scheduler simples com threading ───────────────────────────────────────────
 
@@ -309,7 +331,7 @@ def api_agora():
     # snapshots de hoje para gráfico
     with get_db() as conn:
         snaps = conn.execute(
-            "SELECT hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media FROM snapshots WHERE data=? ORDER BY ts",
+            "SELECT hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media,ab_inst,aceleracao FROM snapshots WHERE data=? ORDER BY ts",
             (hoje,)
         ).fetchall()
 
@@ -337,7 +359,7 @@ def api_historico_data(data_str):
     """Snapshots e cotações de um dia específico."""
     with get_db() as conn:
         snaps = conn.execute(
-            "SELECT hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media FROM snapshots WHERE data=? ORDER BY ts",
+            "SELECT hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media,ab_inst,aceleracao FROM snapshots WHERE data=? ORDER BY ts",
             (data_str,)
         ).fetchall()
         # última cotação do dia por ativo
