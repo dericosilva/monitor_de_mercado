@@ -10,9 +10,15 @@ import json
 import time
 import threading
 import logging
-from datetime import datetime, date
+import os
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
+
+# Fuso horário de Brasília (UTC-3)
+BRT = timezone(timedelta(hours=-3))
+def agora_brt():
+    return datetime.now(BRT)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
@@ -23,7 +29,8 @@ import warnings
 warnings.filterwarnings('ignore', message='.*TzCache.*')
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
-DB_PATH = Path(__file__).parent / 'mercado.db'
+DB_PATH = Path(os.environ.get('DB_PATH', str(Path(__file__).parent / 'mercado.db')))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # ── Mapeamento Yahoo Finance ──────────────────────────────────────────────────
 # ticker_yahoo: código exibido no dashboard
@@ -158,7 +165,7 @@ def coletar_yahoo():
         log.error("Erro ao baixar do Yahoo Finance: %s", e)
         return False
 
-    agora    = datetime.now()
+    agora    = agora_brt()
     ts       = agora.isoformat()
     data_str = agora.strftime("%Y-%m-%d")
     hora_str = agora.strftime("%H:%M:%S")
@@ -258,11 +265,19 @@ def _salvar_snapshot(data_str, hora_str, ts):
 
 # ── Scheduler simples com threading ───────────────────────────────────────────
 
+_coleta_lock = threading.Lock()
+
 def _scheduler_loop():
     INTERVALO = 5 * 60  # 5 minutos
     while True:
         try:
-            coletar_yahoo()
+            if _coleta_lock.acquire(blocking=False):
+                try:
+                    coletar_yahoo()
+                finally:
+                    _coleta_lock.release()
+            else:
+                log.warning("Coleta já em andamento, pulando ciclo.")
         except Exception as e:
             log.error("Erro no scheduler: %s", e)
         time.sleep(INTERVALO)
@@ -380,8 +395,13 @@ def api_historico_data(data_str):
 @app.route("/api/coletar", methods=["POST"])
 def api_coletar():
     """Força coleta manual imediata."""
-    ok = coletar_yahoo()
-    return jsonify({"status": "ok" if ok else "erro"})
+    if _coleta_lock.acquire(blocking=False):
+        try:
+            ok = coletar_yahoo()
+        finally:
+            _coleta_lock.release()
+        return jsonify({"status": "ok" if ok else "erro"})
+    return jsonify({"status": "ocupado", "msg": "Coleta já em andamento"})
 
 @app.route("/api/status")
 def api_status():
@@ -396,7 +416,13 @@ def api_status():
 if __name__ == "__main__":
     init_db()
     # Primeira coleta ao iniciar
-    threading.Thread(target=coletar_yahoo, daemon=True).start()
+    def primeira_coleta():
+        if _coleta_lock.acquire(blocking=False):
+            try:
+                coletar_yahoo()
+            finally:
+                _coleta_lock.release()
+    threading.Thread(target=primeira_coleta, daemon=True).start()
     start_scheduler()
     log.info("Servidor iniciado em http://0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
