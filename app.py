@@ -214,6 +214,8 @@ def coletar_yahoo():
     _salvar_snapshot(data_str, hora_str, ts)
     return True
 
+THR_ACEL = 0.001  # 0,10% — threshold da aceleração do preço
+
 def _salvar_snapshot(data_str, hora_str, ts):
     """Calcula resumo do momento e salva snapshot."""
     with get_db() as conn:
@@ -226,36 +228,51 @@ def _salvar_snapshot(data_str, hora_str, ts):
 
     ra=rq=rn=da=dq=dn=0
     china_vars = []
+    acel_inst = 0  # aceleração instantânea deste snapshot
 
     for r in rows:
-        s = r["sinal"]
-        if r["grupo"] == "risco":
-            if s=="Alta": ra+=1
+        s   = r["sinal"]
+        v   = r["variacao"] or 0
+        grp = r["grupo"]
+
+        # ── contagem de sinais (threshold 0,30%) ──
+        if grp == "risco":
+            if s=="Alta":  ra+=1
             elif s=="Queda": rq+=1
             else: rn+=1
         else:
-            if s=="Alta": da+=1
+            if s=="Alta":  da+=1
             elif s=="Queda": dq+=1
             else: dn+=1
+
+        # ── aceleração (threshold 0,10%) ──
+        # Risco:  sobe > +0,10% → -1  |  cai < -0,10% → +1
+        # Dólar:  sobe > +0,10% → +1  |  cai < -0,10% → -1
+        if grp == "risco":
+            if   v >  THR_ACEL: acel_inst -= 1
+            elif v < -THR_ACEL: acel_inst += 1
+        else:
+            if   v >  THR_ACEL: acel_inst += 1
+            elif v < -THR_ACEL: acel_inst -= 1
+
         if r["cod"] in CHINA_CODS and r["variacao"] is not None:
             china_vars.append(r["variacao"])
 
     china_media = sum(china_vars)/len(china_vars) if china_vars else 0.0
 
-    # A-B instantâneo (soma risco + dólar)
+    # A-B instantâneo dos sinais (threshold 0,30%)
     total_alta  = ra + da
     total_queda = rq + dq
     ab_inst = total_alta - total_queda
 
-    # Aceleração acumulada do dia: soma de ab_inst desde o início do dia
-    # Começa em zero a cada novo dia (igual planilha: J=I+J_anterior, J_primeiro=I_primeiro)
+    # Aceleração acumulada: soma de acel_inst ao longo do dia
     with get_db() as conn:
         ultimo = conn.execute(
             "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
             (data_str,)
         ).fetchone()
     aceleracao_anterior = ultimo["aceleracao"] if ultimo and ultimo["aceleracao"] is not None else 0
-    aceleracao = aceleracao_anterior + ab_inst
+    aceleracao = aceleracao_anterior + acel_inst
 
     with get_db() as conn:
         conn.execute("""
