@@ -214,8 +214,6 @@ def coletar_yahoo():
     _salvar_snapshot(data_str, hora_str, ts)
     return True
 
-THR_ACEL = 0.001  # 0,10% — threshold da aceleração do preço
-
 def _salvar_snapshot(data_str, hora_str, ts):
     """Calcula resumo do momento e salva snapshot."""
     with get_db() as conn:
@@ -228,7 +226,6 @@ def _salvar_snapshot(data_str, hora_str, ts):
 
     ra=rq=rn=da=dq=dn=0
     china_vars = []
-    acel_inst = 0  # aceleração instantânea deste snapshot
 
     for r in rows:
         s   = r["sinal"]
@@ -245,16 +242,6 @@ def _salvar_snapshot(data_str, hora_str, ts):
             elif s=="Queda": dq+=1
             else: dn+=1
 
-        # ── aceleração (threshold 0,10%) ──
-        # Risco:  sobe > +0,10% → -1  |  cai < -0,10% → +1
-        # Dólar:  sobe > +0,10% → +1  |  cai < -0,10% → -1
-        if grp == "risco":
-            if   v >  THR_ACEL: acel_inst -= 1
-            elif v < -THR_ACEL: acel_inst += 1
-        else:
-            if   v >  THR_ACEL: acel_inst += 1
-            elif v < -THR_ACEL: acel_inst -= 1
-
         if r["cod"] in CHINA_CODS and r["variacao"] is not None:
             china_vars.append(r["variacao"])
 
@@ -265,14 +252,16 @@ def _salvar_snapshot(data_str, hora_str, ts):
     total_queda = rq + dq
     ab_inst = total_alta - total_queda
 
-    # Aceleração acumulada: soma de acel_inst ao longo do dia
+    # Aceleração = acumula ab_inst ao longo do dia (igual planilha: J = I + J_anterior)
+    # ab_inst fica entre -31 e +31, típico entre -10 e +10
+    # acumulado ao longo do dia fica na escala correta (±15 como na planilha)
     with get_db() as conn:
         ultimo = conn.execute(
             "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
             (data_str,)
         ).fetchone()
     aceleracao_anterior = ultimo["aceleracao"] if ultimo and ultimo["aceleracao"] is not None else 0
-    aceleracao = aceleracao_anterior + acel_inst
+    aceleracao = aceleracao_anterior + ab_inst
 
     with get_db() as conn:
         conn.execute("""
