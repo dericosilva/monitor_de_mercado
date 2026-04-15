@@ -252,15 +252,26 @@ def _salvar_snapshot(data_str, hora_str, ts):
     total_queda = rq + dq
     ab_inst = total_alta - total_queda
 
-    # Aceleração = acumula ab_inst ao longo do dia (igual planilha: J = I + J_anterior)
-    # ab_inst fica entre -31 e +31, típico entre -10 e +10
-    # acumulado ao longo do dia fica na escala correta (±15 como na planilha)
+    # Aceleração = acumula ab_inst ao longo do DIA (reseta todo dia)
+    # Busca apenas snapshots do mesmo dia para evitar herdar valores corrompidos
     with get_db() as conn:
-        ultimo = conn.execute(
-            "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
+        snaps_hoje = conn.execute(
+            "SELECT COUNT(*) as n, MAX(aceleracao) as ult FROM snapshots WHERE data=?",
             (data_str,)
         ).fetchone()
-    aceleracao_anterior = ultimo["aceleracao"] if ultimo and ultimo["aceleracao"] is not None else 0
+    
+    if snaps_hoje and snaps_hoje["n"] > 0 and snaps_hoje["ult"] is not None:
+        # Já tem snapshots hoje — pega o último valor acumulado do dia
+        with get_db() as conn:
+            ultimo = conn.execute(
+                "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
+                (data_str,)
+            ).fetchone()
+        aceleracao_anterior = ultimo["aceleracao"] if ultimo["aceleracao"] is not None else 0
+    else:
+        # Primeiro snapshot do dia — começa do zero
+        aceleracao_anterior = 0
+    
     aceleracao = aceleracao_anterior + ab_inst
 
     with get_db() as conn:
@@ -408,6 +419,22 @@ def api_coletar():
             _coleta_lock.release()
         return jsonify({"status": "ok" if ok else "erro"})
     return jsonify({"status": "ocupado", "msg": "Coleta já em andamento"})
+
+@app.route("/api/resetar_aceleracao", methods=["POST"])
+def api_resetar_aceleracao():
+    """Reseta a aceleração do dia atual para zero (corrige banco corrompido)."""
+    hoje = date.today().isoformat()
+    with get_db() as conn:
+        conn.execute("UPDATE snapshots SET aceleracao=ab_inst WHERE data=?", (hoje,))
+        # Recalcula acumulado corretamente
+        rows = conn.execute(
+            "SELECT id, ab_inst FROM snapshots WHERE data=? ORDER BY id", (hoje,)
+        ).fetchall()
+        acum = 0
+        for r in rows:
+            acum += r["ab_inst"] or 0
+            conn.execute("UPDATE snapshots SET aceleracao=? WHERE id=?", (acum, r["id"]))
+    return jsonify({"status": "ok", "snapshots_corrigidos": len(rows)})
 
 @app.route("/api/status")
 def api_status():

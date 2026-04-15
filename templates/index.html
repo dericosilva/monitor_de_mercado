@@ -184,6 +184,7 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('live',this)">📡 Ao vivo</div>
+  <div class="tab" onclick="switchTab('ativos',this)">📋 Ativos</div>
   <div class="tab" onclick="switchTab('hist',this)">📅 Histórico</div>
 </div>
 
@@ -225,19 +226,6 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
     </div>
   </div>
 
-  <div class="panels">
-    <div class="panel">
-      <div class="ph"><div class="ptitle r">Ativos de Risco</div><div class="psub">Se subir → IBov ↑ / Dólar ↓</div></div>
-      <table><thead><tr><th>Código</th><th>Nome</th><th>Preço</th><th>Var%</th><th>Sinal</th></tr></thead>
-      <tbody id="tb-r"></tbody></table>
-    </div>
-    <div class="panel">
-      <div class="ph"><div class="ptitle d">Ativos Dólar</div><div class="psub">Se subir → IBov ↓ / Dólar ↑</div></div>
-      <table><thead><tr><th>Código</th><th>Nome</th><th>Preço</th><th>Var%</th><th>Sinal</th></tr></thead>
-      <tbody id="tb-d"></tbody></table>
-    </div>
-  </div>
-
   <div class="chart-wrap">
     <div class="chart-head">
       <div class="chart-title">Direcional Dólar — snapshots a cada 5 min</div>
@@ -263,6 +251,23 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
     <div class="carea"><canvas id="graf-live"></canvas></div>
   </div>
 
+  <div class="pb"></div>
+</div>
+
+<!-- ── ATIVOS ── -->
+<div id="pane-ativos" class="pane">
+  <div class="panels">
+    <div class="panel">
+      <div class="ph"><div class="ptitle r">Ativos de Risco</div><div class="psub">Se subir → IBov ↑ / Dólar ↓</div></div>
+      <table><thead><tr><th>Código</th><th>Nome</th><th>Preço</th><th>Var%</th><th>Sinal</th></tr></thead>
+      <tbody id="tb-r"></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ptitle d">Ativos Dólar</div><div class="psub">Se subir → IBov ↓ / Dólar ↑</div></div>
+      <table><thead><tr><th>Código</th><th>Nome</th><th>Preço</th><th>Var%</th><th>Sinal</th></tr></thead>
+      <tbody id="tb-d"></tbody></table>
+    </div>
+  </div>
   <div class="pb"></div>
 </div>
 
@@ -331,6 +336,7 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
   <div class="si">🔄 Próx. coleta: <span id="prox">5:00</span></div>
   <div class="si">📡 Última: <span id="ult-coleta">--</span></div>
   <div class="si" style="margin-left:auto;font-size:9px;color:#2d3748" id="db-info">banco: --</div>
+  <button class="btn sm" style="font-size:9px;padding:3px 8px" onclick="resetarAceleracao()" title="Recalcula aceleração do dia">↺ Reset aceleração</button>
 </div>
 
 <script>
@@ -628,6 +634,7 @@ function switchTab(id, el){
   document.getElementById('pane-'+id).classList.add('active');
   el.classList.add('active');
   if(id==='hist') carregarDatas();
+  if(id==='ativos') fetchLive(); // garante tabelas atualizadas
 }
 
 // ── Clock + contador ──────────────────────────────────────────────────────────
@@ -639,6 +646,13 @@ setInterval(()=>{
   const m=Math.floor(snapTimer/60),s=snapTimer%60;
   document.getElementById('prox').textContent=`${m}:${String(s).padStart(2,'0')}`;
 },1000);
+
+async function resetarAceleracao(){
+  const r = await fetch('/api/resetar_aceleracao', {method:'POST'});
+  const d = await r.json();
+  toast(`↺ Aceleração recalculada — ${d.snapshots_corrigidos} snapshots corrigidos`);
+  fetchLive();
+}
 
 // ── Polling a cada 30s ────────────────────────────────────────────────────────
 
