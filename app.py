@@ -168,7 +168,7 @@ def coletar_yahoo():
     agora    = agora_brt()
     ts       = agora.isoformat()
     data_str = agora.strftime("%Y-%m-%d")
-    hora_str = agora.strftime("%H:%M:%S")
+    hora_str = agora.strftime("%H:%M")  # sem segundos, igual à planilha
 
     rows = []
     for yahoo_tick, info in YAHOO_MAP.items():
@@ -422,19 +422,35 @@ def api_coletar():
 
 @app.route("/api/resetar_aceleracao", methods=["POST"])
 def api_resetar_aceleracao():
-    """Reseta a aceleração do dia atual para zero (corrige banco corrompido)."""
-    hoje = date.today().isoformat()
+    """Recalcula aceleração corretamente para todos os dias no banco."""
+    data_param = request.json.get("data") if request.json else None
+    hoje_brt = agora_brt().strftime("%Y-%m-%d")
+    
     with get_db() as conn:
-        conn.execute("UPDATE snapshots SET aceleracao=ab_inst WHERE data=?", (hoje,))
-        # Recalcula acumulado corretamente
-        rows = conn.execute(
-            "SELECT id, ab_inst FROM snapshots WHERE data=? ORDER BY id", (hoje,)
-        ).fetchall()
-        acum = 0
-        for r in rows:
-            acum += r["ab_inst"] or 0
-            conn.execute("UPDATE snapshots SET aceleracao=? WHERE id=?", (acum, r["id"]))
-    return jsonify({"status": "ok", "snapshots_corrigidos": len(rows)})
+        if data_param:
+            datas = [data_param]
+        else:
+            # Recalcula todos os dias
+            rows_d = conn.execute("SELECT DISTINCT data FROM snapshots ORDER BY data").fetchall()
+            datas = [r["data"] for r in rows_d]
+        
+        total = 0
+        for data_str in datas:
+            rows = conn.execute(
+                "SELECT id, ra, rq, da, dq FROM snapshots WHERE data=? ORDER BY id",
+                (data_str,)
+            ).fetchall()
+            acum = 0
+            for r in rows:
+                ab = ((r["ra"] or 0) + (r["da"] or 0)) - ((r["rq"] or 0) + (r["dq"] or 0))
+                acum += ab
+                conn.execute(
+                    "UPDATE snapshots SET ab_inst=?, aceleracao=? WHERE id=?",
+                    (ab, acum, r["id"])
+                )
+            total += len(rows)
+    
+    return jsonify({"status": "ok", "snapshots_corrigidos": total, "datas": datas})
 
 @app.route("/api/status")
 def api_status():

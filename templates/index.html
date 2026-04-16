@@ -648,9 +648,14 @@ setInterval(()=>{
 },1000);
 
 async function resetarAceleracao(){
-  const r = await fetch('/api/resetar_aceleracao', {method:'POST'});
+  toast('⏳ Recalculando todos os dias...');
+  const r = await fetch('/api/resetar_aceleracao', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({})
+  });
   const d = await r.json();
-  toast(`↺ Aceleração recalculada — ${d.snapshots_corrigidos} snapshots corrigidos`);
+  toast(`✅ ${d.snapshots_corrigidos} snapshots recalculados em ${(d.datas||[]).length} dias`);
   fetchLive();
 }
 
