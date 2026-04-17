@@ -469,17 +469,25 @@ function initCharts(){
   ]);
 }
 
+function calcAceleracao(snaps) {
+  // Recalcula aceleração no frontend, sempre começando do ZERO
+  // no primeiro snapshot visível — ignora qualquer valor do banco
+  let acum = 0;
+  return snaps.map(s => {
+    const ab = ((s.ra||0)+(s.da||0)) - ((s.rq||0)+(s.dq||0));
+    acum += ab;
+    return acum;
+  });
+}
+
 function feedChart(chart, snaps, modeHist=false){
   if(!chart||!snaps||!snaps.length) return;
   chart.data.labels = snaps.map(s=>s.hora);
-  // Alta total = risco Alta + dólar Alta (igual E6 da planilha: COUNTIF todos)
   chart.data.datasets[0].data = snaps.map(s=>(s.ra||0)+(s.da||0));
-  // Queda total = risco Queda + dólar Queda
   chart.data.datasets[1].data = snaps.map(s=>(s.rq||0)+(s.dq||0));
-  // Neutro total
   chart.data.datasets[2].data = snaps.map(s=>(s.rn||0)+(s.dn||0));
-  // Aceleração = soma cumulativa de (Alta-Queda) ao longo do dia (igual coluna J da planilha)
-  chart.data.datasets[3].data = snaps.map(s=>s.aceleracao!=null?s.aceleracao:0);
+  // Aceleração sempre começa do zero no primeiro snap visível
+  chart.data.datasets[3].data = calcAceleracao(snaps);
   chart.update('none');
 }
 
