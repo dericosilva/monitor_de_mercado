@@ -340,6 +340,7 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
   <div class="si">📡 Última: <span id="ult-coleta">--</span></div>
   <div class="si" style="margin-left:auto;font-size:9px;color:#2d3748" id="db-info">banco: --</div>
   <button class="btn sm" style="font-size:9px;padding:3px 8px" onclick="resetarAceleracao()" title="Recalcula aceleração do dia">↺ Reset aceleração</button>
+  <button class="btn sm" style="font-size:9px;padding:3px 8px" onclick="limparUTC()" title="Remove snapshots com hora UTC errada">🧹 Limpar UTC</button>
 </div>
 
 <script>
@@ -651,6 +652,13 @@ setInterval(()=>{
   const m=Math.floor(snapTimer/60),s=snapTimer%60;
   document.getElementById('prox').textContent=`${m}:${String(s).padStart(2,'0')}`;
 },1000);
+
+async function limparUTC(){
+  const r = await fetch('/api/limpar_snapshots_utc', {method:'POST'});
+  const d = await r.json();
+  toast(`🧹 ${d.removidos} snapshots UTC removidos`);
+  fetchLive();
+}
 
 async function resetarAceleracao(){
   toast('⏳ Recalculando todos os dias...');

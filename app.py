@@ -389,7 +389,7 @@ def api_agora():
         "resumo": {"ra":ra,"rq":rq,"rn":rn,"da":da,"dq":dq,"dn":dn,
                    "acum_risco":ra-rq,"acum_dolar":da-dq,"china_media":china_media},
         "snapshots": [dict(s) for s in snaps],
-        "ultima_coleta": datetime.now().strftime("%H:%M:%S"),
+        "ultima_coleta": agora_brt().strftime("%H:%M:%S"),
         "hoje": hoje,
     })
 
@@ -471,10 +471,31 @@ def api_resetar_aceleracao():
 @app.route("/api/status")
 def api_status():
     with get_db() as conn:
-        total = conn.execute("SELECT COUNT(*) as n FROM cotacoes").fetchone()["n"]
+        total  = conn.execute("SELECT COUNT(*) as n FROM cotacoes").fetchone()["n"]
         ultima = conn.execute("SELECT MAX(ts) as t FROM cotacoes").fetchone()["t"]
         dias   = conn.execute("SELECT COUNT(DISTINCT data) as n FROM snapshots").fetchone()["n"]
-    return jsonify({"total_registros": total, "ultima_coleta": ultima, "dias_historico": dias})
+        # Mostra últimos 3 snapshots para diagnóstico
+        ultimos = conn.execute(
+            "SELECT data, hora, ra, rq, da, dq, ab_inst FROM snapshots ORDER BY id DESC LIMIT 3"
+        ).fetchall()
+    return jsonify({
+        "total_registros": total,
+        "ultima_coleta": ultima,
+        "dias_historico": dias,
+        "ultimos_snapshots": [dict(r) for r in ultimos],
+        "hora_servidor_brt": agora_brt().strftime("%Y-%m-%d %H:%M:%S")
+    })
+
+@app.route("/api/limpar_snapshots_utc", methods=["POST"])
+def api_limpar_snapshots_utc():
+    """Remove snapshots com hora em UTC (>= 20:00) que deveriam estar em BRT."""
+    hoje = agora_brt().strftime("%Y-%m-%d")
+    with get_db() as conn:
+        # Snapshots salvos com hora UTC ficam entre 20:00-23:59 quando BRT é 17:00-20:59
+        removidos = conn.execute(
+            "DELETE FROM snapshots WHERE data=? AND hora >= '20:00'", (hoje,)
+        ).rowcount
+    return jsonify({"status": "ok", "removidos": removidos})
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
