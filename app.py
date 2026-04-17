@@ -151,49 +151,54 @@ def coletar_yahoo():
     tickers = list(YAHOO_MAP.keys())
     log.info("Coletando %d tickers do Yahoo Finance...", len(tickers))
 
-    try:
-        data = yf.download(
-            tickers,
-            period="2d",
-            interval="1d",
-            group_by="ticker",
-            auto_adjust=True,
-            progress=False,
-            threads=True,
-        )
-    except Exception as e:
-        log.error("Erro ao baixar do Yahoo Finance: %s", e)
-        return False
-
     agora    = agora_brt()
     ts       = agora.isoformat()
     data_str = agora.strftime("%Y-%m-%d")
-    hora_str = agora.strftime("%H:%M")  # sem segundos, igual à planilha
+    hora_str = agora.strftime("%H:%M")
 
     rows = []
+    # Coleta cada ticker individualmente com dados intraday (5 min)
+    # para calcular variação real vs abertura do dia
     for yahoo_tick, info in YAHOO_MAP.items():
         try:
-            if len(tickers) == 1:
-                df = data
-            else:
-                df = data[yahoo_tick] if yahoo_tick in data.columns.get_level_values(0) else None
+            # period="1d" interval="5m" = dados intraday de hoje
+            df = yf.download(
+                yahoo_tick,
+                period="1d",
+                interval="5m",
+                auto_adjust=True,
+                progress=False,
+                threads=False,
+            )
 
             if df is None or df.empty:
-                continue
-
-            df = df.dropna()
-            if len(df) < 1:
-                continue
-
-            preco_atual = float(df["Close"].iloc[-1])
-            if len(df) >= 2:
-                preco_ant = float(df["Close"].iloc[-2])
-                variacao  = (preco_atual - preco_ant) / preco_ant if preco_ant else 0.0
+                # Fallback: dados diários se intraday não disponível
+                df = yf.download(
+                    yahoo_tick,
+                    period="2d",
+                    interval="1d",
+                    auto_adjust=True,
+                    progress=False,
+                    threads=False,
+                )
+                if df is None or df.empty:
+                    continue
+                df = df.dropna()
+                if len(df) < 2:
+                    continue
+                preco_atual = float(df["Close"].iloc[-1])
+                preco_ref   = float(df["Close"].iloc[-2])  # fechamento anterior
             else:
-                variacao = 0.0
+                df = df.dropna()
+                if df.empty:
+                    continue
+                preco_atual = float(df["Close"].iloc[-1])
+                # Variação vs abertura do dia (primeira cotação do dia)
+                preco_ref   = float(df["Open"].iloc[0])
 
-            sinal = calc_sinal(variacao, info["inv"])
-            grupo = "risco" if info in ATIVOS_RISCO else "dolar"
+            variacao = (preco_atual - preco_ref) / preco_ref if preco_ref else 0.0
+            sinal    = calc_sinal(variacao, info["inv"])
+            grupo    = "risco" if info in ATIVOS_RISCO else "dolar"
 
             rows.append((ts, data_str, hora_str, info["cod"], info["nome"],
                          preco_atual, variacao, sinal, grupo))
