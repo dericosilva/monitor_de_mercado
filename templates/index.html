@@ -233,7 +233,7 @@ input[type=date]:focus{outline:none;border-color:var(--acento)}
         <div class="leg"><div class="legdot" style="background:#00e676"></div>Alta</div>
         <div class="leg"><div class="legdot" style="background:#f5222d"></div>Baixa</div>
         <div class="leg"><div class="legdot" style="background:#888;width:16px;height:3px;border-radius:0"></div>Neutro</div>
-        <div class="leg"><div class="legdot" style="background:#f6c90e;width:16px;height:3px;border-radius:0"></div>Aceleração do preço</div>
+        <div class="leg"><div class="legdot" style="background:#f6c90e;width:16px;height:3px;border-radius:0"></div>A-B (média 3p)</div>
       </div>
     </div>
     <div class="chart-filters">
@@ -470,13 +470,15 @@ function initCharts(){
 }
 
 function calcAceleracao(snaps) {
-  // Recalcula aceleração no frontend, sempre começando do ZERO
-  // no primeiro snapshot visível — ignora qualquer valor do banco
-  let acum = 0;
-  return snaps.map(s => {
-    const ab = ((s.ra||0)+(s.da||0)) - ((s.rq||0)+(s.dq||0));
-    acum += ab;
-    return acum;
+  // A-B instantâneo com média móvel de 3 períodos para suavizar
+  // Não acumula — mostra a força do momento como na planilha
+  const ab = snaps.map(s => ((s.ra||0)+(s.da||0)) - ((s.rq||0)+(s.dq||0)));
+  
+  // Média móvel de 3 períodos
+  return ab.map((v, i) => {
+    if (i === 0) return v;
+    if (i === 1) return Math.round((ab[0] + ab[1]) / 2 * 10) / 10;
+    return Math.round((ab[i-2] + ab[i-1] + ab[i]) / 3 * 10) / 10;
   });
 }
 
