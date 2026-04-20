@@ -75,6 +75,41 @@ ATIVOS_DOLAR = [
 CHINA_CODS = {"CHINA50", "HSI", ".DJSH", ".SZI", ".SSEC"}
 THR = 0.003  # 0.3%
 
+def mercado_aberto():
+    """Verifica se algum mercado relevante está aberto (BRT)."""
+    agora = agora_brt()
+    dia = agora.weekday()  # 0=seg, 6=dom
+    hora = agora.hour
+    minuto = agora.minute
+    hm = hora * 60 + minuto
+
+    # Fim de semana — nenhum mercado aberto
+    if dia >= 5:
+        return False
+
+    # Mercados cobertos e seus horários em BRT:
+    # Ásia (Hang Seng, Shanghai, SZSE):   20:00-03:00 BRT
+    # Europa (Oslo):                       05:00-13:30 BRT
+    # EUA (NYSE/NASDAQ, futuros):          10:00-17:00 BRT (regular) / 07:00-17:30 BRT (futuros)
+    # Futuros EUA pré-market:              07:00-10:00 BRT
+    # Câmbio:                              24h em dias úteis
+
+    # Janela útil: 05:00 - 18:30 BRT (cobre Europa + EUA)
+    # Adicionalmente: 20:00 - 03:00 BRT (Ásia)
+    abertura_europa = 5 * 60      # 05:00
+    fechamento_eua  = 18 * 60 + 30  # 18:30
+    abertura_asia   = 20 * 60     # 20:00
+    # Dia seguinte Ásia até 03:00 = só verificamos se hm < 180 (3h) OU hm > abertura_asia
+
+    if abertura_europa <= hm <= fechamento_eua:
+        return True
+    if hm >= abertura_asia:
+        return True
+    if hm < (3 * 60):  # antes das 3h = final do pregão asiático
+        return True
+
+    return False
+
 TODOS = ATIVOS_RISCO + ATIVOS_DOLAR
 YAHOO_MAP = {a["yahoo"]: a for a in TODOS}  # yahoo_ticker -> info
 
@@ -227,28 +262,62 @@ def coletar_yahoo():
         )
 
     log.info("Salvas %d cotações.", len(rows))
-    _salvar_snapshot(data_str, hora_str, ts)
+
+    if mercado_aberto():
+        _salvar_snapshot(data_str, hora_str, ts)
+        log.info("Snapshot salvo — mercado aberto.")
+    else:
+        log.info("Mercado fechado — snapshot ignorado (dados estáticos não acumulam aceleração).")
+
     return True
+
+THR_ACEL = 0.001  # 0,10% — threshold da aceleração
 
 def _salvar_snapshot(data_str, hora_str, ts):
     """Calcula resumo do momento e salva snapshot."""
+
+    # ── Cotações atuais ──
     with get_db() as conn:
-        rows = conn.execute("""
-            SELECT cod, sinal, variacao, grupo
+        rows_atuais = conn.execute("""
+            SELECT cod, sinal, variacao, preco, grupo
             FROM cotacoes
             WHERE data = ?
               AND id IN (SELECT MAX(id) FROM cotacoes WHERE data = ? GROUP BY cod)
         """, (data_str, data_str)).fetchall()
 
+    # ── Cotações do snapshot anterior (para calcular aceleração) ──
+    # Pega o penúltimo conjunto de cotações salvas (snapshot anterior)
+    with get_db() as conn:
+        ultima_hora = conn.execute("""
+            SELECT hora FROM cotacoes
+            WHERE data = ?
+            GROUP BY hora
+            ORDER BY MAX(id) DESC
+            LIMIT 1 OFFSET 1
+        """, (data_str,)).fetchone()
+
+    precos_anteriores = {}
+    if ultima_hora:
+        with get_db() as conn:
+            rows_ant = conn.execute("""
+                SELECT cod, preco FROM cotacoes
+                WHERE data = ? AND hora = ?
+                  AND id IN (SELECT MAX(id) FROM cotacoes WHERE data=? AND hora=? GROUP BY cod)
+            """, (data_str, ultima_hora["hora"], data_str, ultima_hora["hora"])).fetchall()
+        precos_anteriores = {r["cod"]: r["preco"] for r in rows_ant}
+
     ra=rq=rn=da=dq=dn=0
     china_vars = []
+    acel_inst = 0
 
-    for r in rows:
+    for r in rows_atuais:
         s   = r["sinal"]
-        v   = r["variacao"] or 0
         grp = r["grupo"]
+        cod = r["cod"]
+        preco_atual = r["preco"]
+        preco_ant   = precos_anteriores.get(cod)
 
-        # ── contagem de sinais (threshold 0,30%) ──
+        # ── Contagem de sinais (threshold 0,30%) — direcional IBov ──
         if grp == "risco":
             if s=="Alta":  ra+=1
             elif s=="Queda": rq+=1
@@ -258,43 +327,45 @@ def _salvar_snapshot(data_str, hora_str, ts):
             elif s=="Queda": dq+=1
             else: dn+=1
 
+        # ── Aceleração (threshold 0,10%) ──
+        # Compara preço ATUAL vs preço do SNAPSHOT ANTERIOR
+        # Independente do direcional — mede se o movimento acelerou
+        if preco_atual and preco_ant and preco_ant != 0:
+            var_snapshot = (preco_atual - preco_ant) / preco_ant
+
+            if grp == "risco":
+                # Risco sobe → -1 (pressiona dólar pra baixo)
+                # Risco cai  → +1 (pressiona dólar pra cima)
+                if   var_snapshot >  THR_ACEL: acel_inst -= 1
+                elif var_snapshot < -THR_ACEL: acel_inst += 1
+            else:
+                # Dólar sobe → +1
+                # Dólar cai  → -1
+                if   var_snapshot >  THR_ACEL: acel_inst += 1
+                elif var_snapshot < -THR_ACEL: acel_inst -= 1
+
         if r["cod"] in CHINA_CODS and r["variacao"] is not None:
             china_vars.append(r["variacao"])
 
     china_media = sum(china_vars)/len(china_vars) if china_vars else 0.0
+    ab_inst = (ra + da) - (rq + dq)
 
-    # A-B instantâneo dos sinais (threshold 0,30%)
-    total_alta  = ra + da
-    total_queda = rq + dq
-    ab_inst = total_alta - total_queda
-
-    # Aceleração = acumula ab_inst ao longo do DIA (reseta todo dia)
-    # Busca apenas snapshots do mesmo dia para evitar herdar valores corrompidos
+    # ── Aceleração acumulada do dia ──
     with get_db() as conn:
-        snaps_hoje = conn.execute(
-            "SELECT COUNT(*) as n, MAX(aceleracao) as ult FROM snapshots WHERE data=?",
+        ultimo = conn.execute(
+            "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
             (data_str,)
         ).fetchone()
-    
-    if snaps_hoje and snaps_hoje["n"] > 0 and snaps_hoje["ult"] is not None:
-        # Já tem snapshots hoje — pega o último valor acumulado do dia
-        with get_db() as conn:
-            ultimo = conn.execute(
-                "SELECT aceleracao FROM snapshots WHERE data=? ORDER BY id DESC LIMIT 1",
-                (data_str,)
-            ).fetchone()
-        aceleracao_anterior = ultimo["aceleracao"] if ultimo["aceleracao"] is not None else 0
-    else:
-        # Primeiro snapshot do dia — começa do zero
-        aceleracao_anterior = 0
-    
-    aceleracao = aceleracao_anterior + ab_inst
+    aceleracao_anterior = (ultimo["aceleracao"] if ultimo and ultimo["aceleracao"] is not None else 0)
+    aceleracao = aceleracao_anterior + acel_inst
 
     with get_db() as conn:
         conn.execute("""
             INSERT INTO snapshots(ts,data,hora,ra,rq,rn,da,dq,dn,acum_risco,acum_dolar,china_media,ab_inst,aceleracao)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (ts, data_str, hora_str, ra, rq, rn, da, dq, dn, ra-rq, da-dq, china_media, ab_inst, aceleracao))
+    
+    log.info("Snapshot: Alta=%d Queda=%d AcelInst=%d AcelAcum=%d", ra+da, rq+dq, acel_inst, aceleracao)
 
 # ── Scheduler simples com threading ───────────────────────────────────────────
 
