@@ -296,15 +296,16 @@ def _salvar_snapshot(data_str, hora_str, ts):
             LIMIT 1 OFFSET 1
         """, (data_str,)).fetchone()
 
-    precos_anteriores = {}
+    # Pega variação% do snapshot anterior para comparar aceleração
+    variacoes_ant = {}
     if ultima_hora:
         with get_db() as conn:
             rows_ant = conn.execute("""
-                SELECT cod, preco FROM cotacoes
+                SELECT cod, variacao FROM cotacoes
                 WHERE data = ? AND hora = ?
                   AND id IN (SELECT MAX(id) FROM cotacoes WHERE data=? AND hora=? GROUP BY cod)
             """, (data_str, ultima_hora["hora"], data_str, ultima_hora["hora"])).fetchall()
-        precos_anteriores = {r["cod"]: r["preco"] for r in rows_ant}
+        variacoes_ant = {r["cod"]: r["variacao"] for r in rows_ant}
 
     ra=rq=rn=da=dq=dn=0
     china_vars = []
@@ -314,8 +315,6 @@ def _salvar_snapshot(data_str, hora_str, ts):
         s   = r["sinal"]
         grp = r["grupo"]
         cod = r["cod"]
-        preco_atual = r["preco"]
-        preco_ant   = precos_anteriores.get(cod)
 
         # ── Contagem de sinais (threshold 0,30%) — direcional IBov ──
         if grp == "risco":
@@ -328,21 +327,22 @@ def _salvar_snapshot(data_str, hora_str, ts):
             else: dn+=1
 
         # ── Aceleração (threshold 0,10%) ──
-        # Compara preço ATUAL vs preço do SNAPSHOT ANTERIOR
-        # Independente do direcional — mede se o movimento acelerou
-        if preco_atual and preco_ant and preco_ant != 0:
-            var_snapshot = (preco_atual - preco_ant) / preco_ant
+        # Compara VARIAÇÃO% atual vs VARIAÇÃO% do snapshot anterior
+        # delta positivo = ativo subiu mais que antes
+        # delta negativo = ativo caiu mais (ou subiu menos) que antes
+        # Isso funciona mesmo com preços estáticos entre coletas
+        var_atual = r["variacao"] or 0
+        var_ant   = variacoes_ant.get(cod)
+
+        if var_ant is not None:
+            delta = var_atual - var_ant
 
             if grp == "risco":
-                # Risco sobe → -1 (pressiona dólar pra baixo)
-                # Risco cai  → +1 (pressiona dólar pra cima)
-                if   var_snapshot >  THR_ACEL: acel_inst -= 1
-                elif var_snapshot < -THR_ACEL: acel_inst += 1
+                if   delta >  THR_ACEL: acel_inst -= 1  # risco acelerou pra cima → dólar cai
+                elif delta < -THR_ACEL: acel_inst += 1  # risco acelerou pra baixo → dólar sobe
             else:
-                # Dólar sobe → +1
-                # Dólar cai  → -1
-                if   var_snapshot >  THR_ACEL: acel_inst += 1
-                elif var_snapshot < -THR_ACEL: acel_inst -= 1
+                if   delta >  THR_ACEL: acel_inst += 1  # dólar acelerou pra cima
+                elif delta < -THR_ACEL: acel_inst -= 1  # dólar acelerou pra baixo
 
         if r["cod"] in CHINA_CODS and r["variacao"] is not None:
             china_vars.append(r["variacao"])
