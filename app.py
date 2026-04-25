@@ -496,6 +496,56 @@ def api_historico_data(data_str):
         "cotacoes": [dict(c) for c in cotacoes],
     })
 
+@app.route("/api/investing_push", methods=["POST"])
+def api_investing_push():
+    """Recebe dados da extensão Chrome que lê o Investing.com."""
+    try:
+        data = request.get_json()
+        if not data or 'ativos' not in data:
+            return jsonify({"status": "erro", "msg": "payload inválido"}), 400
+
+        ativos = data['ativos']
+        agora_b = agora_brt()
+        ts       = agora_b.isoformat()
+        data_str = agora_b.strftime("%Y-%m-%d")
+        hora_str = agora_b.strftime("%H:%M")
+
+        rows = []
+        for a in ativos:
+            cod      = a.get('cod')
+            grupo    = a.get('grupo')
+            nome     = a.get('nome', cod)
+            preco    = a.get('preco')
+            variacao = a.get('variacao')
+
+            if not cod or variacao is None:
+                continue
+
+            # Descobre se ativo é invertido
+            todos = ATIVOS_RISCO + ATIVOS_DOLAR
+            info  = next((x for x in todos if x['cod'] == cod), None)
+            inv   = info.get('inv', False) if info else False
+
+            sinal = calc_sinal(variacao, inv)
+            rows.append((ts, data_str, hora_str, cod, nome, preco, variacao, sinal, grupo))
+
+        if not rows:
+            return jsonify({"status": "erro", "msg": "nenhum ativo válido"}), 400
+
+        with get_db() as conn:
+            conn.executemany(
+                "INSERT INTO cotacoes(ts,data,hora,cod,nome,preco,variacao,sinal,grupo) VALUES(?,?,?,?,?,?,?,?,?)",
+                rows
+            )
+
+        log.info("Investing Push: %d ativos recebidos da extensão", len(rows))
+        _salvar_snapshot(data_str, hora_str, ts)
+        return jsonify({"status": "ok", "recebidos": len(rows)})
+
+    except Exception as e:
+        log.error("Erro no investing_push: %s", e)
+        return jsonify({"status": "erro", "msg": str(e)}), 500
+
 @app.route("/api/coletar", methods=["POST"])
 def api_coletar():
     """Força coleta manual imediata."""
