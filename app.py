@@ -14,6 +14,10 @@ import os
 from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
+try:
+    from flask_cors import CORS
+except ImportError:
+    CORS = None
 
 # Fuso horário de Brasília (UTC-3)
 BRT = timezone(timedelta(hours=-3))
@@ -29,6 +33,8 @@ import warnings
 warnings.filterwarnings('ignore', message='.*TzCache.*')
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+if CORS:
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
 DB_PATH = Path(os.environ.get('DB_PATH', str(Path(__file__).parent / 'mercado.db')))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
