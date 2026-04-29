@@ -595,6 +595,50 @@ def api_resetar_aceleracao():
     
     return jsonify({"status": "ok", "snapshots_corrigidos": total, "datas": datas})
 
+@app.route("/api/limpar_duplicados", methods=["POST"])
+def api_limpar_duplicados():
+    """Remove snapshots duplicados mantendo apenas 1 por hora por dia."""
+    data_param = request.json.get("data") if request.json else None
+    
+    with get_db() as conn:
+        if data_param:
+            datas = [data_param]
+        else:
+            rows = conn.execute("SELECT DISTINCT data FROM snapshots ORDER BY data").fetchall()
+            datas = [r["data"] for r in rows]
+        
+        total_removidos = 0
+        for data_str in datas:
+            # Pega todos os snapshots do dia ordenados
+            snaps = conn.execute(
+                "SELECT id, hora FROM snapshots WHERE data=? ORDER BY id",
+                (data_str,)
+            ).fetchall()
+            
+            # Mantém apenas o ÚLTIMO snapshot de cada intervalo de 5 minutos
+            vistos = {}
+            ids_manter = set()
+            for s in snaps:
+                # Agrupa por hora:minuto arredondado para 5 min
+                h, m = s["hora"].split(":")[:2]
+                m_round = str((int(m) // 5) * 5).zfill(2)
+                chave = f"{h}:{m_round}"
+                vistos[chave] = s["id"]  # sobrescreve, fica com o último
+            
+            ids_manter = set(vistos.values())
+            todos_ids = {s["id"] for s in snaps}
+            ids_remover = todos_ids - ids_manter
+            
+            if ids_remover:
+                conn.execute(
+                    f"DELETE FROM snapshots WHERE id IN ({','.join(str(i) for i in ids_remover)})"
+                )
+                total_removidos += len(ids_remover)
+                log.info("Limpeza %s: removidos %d duplicados, mantidos %d", 
+                         data_str, len(ids_remover), len(ids_manter))
+    
+    return jsonify({"status": "ok", "removidos": total_removidos, "datas": datas})
+
 @app.route("/api/status")
 def api_status():
     with get_db() as conn:
