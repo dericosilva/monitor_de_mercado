@@ -179,7 +179,7 @@ def calc_sinal(variacao, inv=False):
 
 # ── Coleta Yahoo Finance ───────────────────────────────────────────────────────
 
-def coletar_yahoo():
+def coletar_yahoo(salvar_snapshot=True):
     """Busca cotações do Yahoo Finance e salva no banco."""
     try:
         import yfinance as yf
@@ -269,11 +269,13 @@ def coletar_yahoo():
 
     log.info("Salvas %d cotações.", len(rows))
 
-    if mercado_aberto():
+    if salvar_snapshot and mercado_aberto():
         _salvar_snapshot(data_str, hora_str, ts)
         log.info("Snapshot salvo — mercado aberto.")
+    elif not salvar_snapshot:
+        log.info("Snapshot ignorado — extensão Investing ativa como fonte principal.")
     else:
-        log.info("Mercado fechado — snapshot ignorado (dados estáticos não acumulam aceleração).")
+        log.info("Mercado fechado — snapshot ignorado.")
 
     return True
 
@@ -378,16 +380,35 @@ def _salvar_snapshot(data_str, hora_str, ts):
 _coleta_lock = threading.Lock()
 
 def _scheduler_loop():
+    """Coleta Yahoo Finance como backup — só salva snapshot se extensão não coletou nos últimos 10 min."""
     INTERVALO = 5 * 60  # 5 minutos
     while True:
         try:
-            if _coleta_lock.acquire(blocking=False):
-                try:
-                    coletar_yahoo()
-                finally:
-                    _coleta_lock.release()
+            # Verifica se a extensão coletou recentemente (últimos 10 min)
+            hoje = agora_brt().strftime("%Y-%m-%d")
+            with get_db() as conn:
+                ultimo = conn.execute(
+                    "SELECT MAX(ts) as t FROM cotacoes WHERE data=? AND hora >= ?",
+                    (hoje, (agora_brt() - __import__('datetime').timedelta(minutes=10)).strftime("%H:%M"))
+                ).fetchone()
+            
+            extensao_ativa = ultimo and ultimo["t"]
+            
+            if extensao_ativa:
+                log.info("Extensão ativa — Yahoo Finance em modo backup (sem snapshot).")
+                # Coleta mas NÃO salva snapshot (extensão já faz isso)
+                if _coleta_lock.acquire(blocking=False):
+                    try:
+                        coletar_yahoo(salvar_snapshot=False)
+                    finally:
+                        _coleta_lock.release()
             else:
-                log.warning("Coleta já em andamento, pulando ciclo.")
+                log.info("Extensão inativa — Yahoo Finance como fonte principal.")
+                if _coleta_lock.acquire(blocking=False):
+                    try:
+                        coletar_yahoo(salvar_snapshot=True)
+                    finally:
+                        _coleta_lock.release()
         except Exception as e:
             log.error("Erro no scheduler: %s", e)
         time.sleep(INTERVALO)
@@ -638,6 +659,31 @@ def api_limpar_duplicados():
                          data_str, len(ids_remover), len(ids_manter))
     
     return jsonify({"status": "ok", "removidos": total_removidos, "datas": datas})
+
+@app.route("/api/limpar_fora_pregao", methods=["POST"])
+def api_limpar_fora_pregao():
+    """Remove snapshots salvos fora do horário de pregão (antes 05:00 ou depois 19:30)."""
+    data_param = request.json.get("data") if request.json else None
+    hoje = agora_brt().strftime("%Y-%m-%d")
+    data_str = data_param or hoje
+    
+    with get_db() as conn:
+        removidos = conn.execute(
+            "DELETE FROM snapshots WHERE data=? AND (hora < '05:00' OR hora > '19:30')",
+            (data_str,)
+        ).rowcount
+        # Recalcula aceleração do dia
+        rows = conn.execute(
+            "SELECT id, ra, rq, da, dq FROM snapshots WHERE data=? ORDER BY id",
+            (data_str,)
+        ).fetchall()
+        acum = 0
+        for r in rows:
+            ab = ((r["ra"]or 0)+(r["da"]or 0))-((r["rq"]or 0)+(r["dq"]or 0))
+            acum += ab
+            conn.execute("UPDATE snapshots SET ab_inst=?, aceleracao=? WHERE id=?", (ab, acum, r["id"]))
+    
+    return jsonify({"status": "ok", "removidos": removidos, "snapshots_restantes": len(rows)})
 
 @app.route("/api/status")
 def api_status():
